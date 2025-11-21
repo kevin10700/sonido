@@ -2,94 +2,77 @@ package com.example.sooo
 
 import android.Manifest
 import android.os.Bundle
+import android.widget.Button
+import android.widget.TextView
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.core.graphics.toColor
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
-
-// Helper function to format score to percentage
-fun Float.toPercentString(): String {
-    return "${(this * 100).toInt()}%"
-}
 
 class MainActivity : ComponentActivity(), AudioClassificationHelper.AudioClassificationListener {
 
     private lateinit var audioHelper: AudioClassificationHelper
-    private var classificationResult by mutableStateOf("Presiona para grabar y analizar un audio")
-    private var isRecording by mutableStateOf(false)
-    private var hasInitializationFailed by mutableStateOf(false)
+    private lateinit var resultTextView: TextView
+    private lateinit var recordButton: Button
+
+    private var isRecording = false
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted: Boolean ->
         if (isGranted) {
-            // Inicia la grabación después de obtener el permiso
-            isRecording = true
-            audioHelper.startRecording()
-            classificationResult = "Grabando...\n(Presiona de nuevo para detener y analizar)"
+            startRecordingProcess()
         } else {
-            classificationResult = "El permiso para grabar fue denegado."
+            resultTextView.text = "El permiso para grabar fue denegado."
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main)
+
+        resultTextView = findViewById(R.id.result_text)
+        recordButton = findViewById(R.id.record_button)
+
         audioHelper = AudioClassificationHelper(this, this)
 
-        setContent {
-            MainScreen(
-                result = classificationResult,
-                isRecording = isRecording,
-                isButtonEnabled = !hasInitializationFailed,
-                onButtonClick = {
-                    if (isRecording) {
-                        // Si está grabando, detiene y analiza en una corrutina
-                        lifecycleScope.launch {
-                            audioHelper.stopRecordingAndAnalyze()
-                        }
-                        isRecording = false
-                        classificationResult = "Analizando..."
-                    } else {
-                        // Si no está grabando, pide permiso y empieza
-                        requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                    }
-                }
-            )
+        recordButton.setOnClickListener {
+            if (isRecording) {
+                stopRecordingAndAnalyzeProcess()
+            } else {
+                requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            }
         }
+    }
+
+    private fun startRecordingProcess() {
+        isRecording = true
+        audioHelper.startRecording()
+        resultTextView.text = "Grabando...\n(Presiona de nuevo para detener y analizar)"
+        recordButton.text = "Detener y Analizar"
+    }
+
+    private fun stopRecordingAndAnalyzeProcess() {
+        lifecycleScope.launch {
+            audioHelper.stopRecordingAndAnalyze()
+        }
+        isRecording = false
+        resultTextView.text = "Analizando..."
+        recordButton.text = "Grabar Sonido"
     }
 
     override fun onPause() {
         super.onPause()
         if (isRecording) {
-            lifecycleScope.launch {
-                audioHelper.stopRecordingAndAnalyze()
-            }
-            isRecording = false
+            stopRecordingAndAnalyzeProcess()
         }
     }
 
     override fun onError(error: String) {
         runOnUiThread {
-            classificationResult = "ERROR FATAL:\n$error"
-            hasInitializationFailed = true
+            resultTextView.text = "ERROR FATAL:\n$error"
+            recordButton.isEnabled = false
         }
     }
 
@@ -98,9 +81,11 @@ class MainActivity : ComponentActivity(), AudioClassificationHelper.AudioClassif
 
         val resultStr = if (topResult != null) {
             val interestingLabels = setOf("Perro", "Gato", "Leon")
-            // Aumentamos el umbral de confianza al 75% para evitar falsos positivos
-            if (topResult.key in interestingLabels && topResult.value > 0.75f) {
-                "¡Resultado: ${topResult.key}! (${topResult.value.toPercentString()})"
+            val confidence = topResult.value
+            val label = topResult.key
+
+            if (label in interestingLabels && confidence > 0.75f) {
+                "¡Resultado: $label! (${(confidence * 100).toInt()}%)"
             } else {
                 "No se escuchó ningún sonido de animal."
             }
@@ -109,30 +94,7 @@ class MainActivity : ComponentActivity(), AudioClassificationHelper.AudioClassif
         }
 
         runOnUiThread {
-            classificationResult = resultStr
-        }
-    }
-}
-
-@Composable
-fun MainScreen(result: String, isRecording: Boolean, isButtonEnabled: Boolean, onButtonClick: () -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(text = result, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-        Button(
-            onClick = onButtonClick,
-            enabled = isButtonEnabled,
-            modifier = Modifier.padding(top = 24.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = if (isRecording) Color.Gray else Color.Red
-            )
-        ) {
-            Text(text = if (isRecording) "Detener y Analizar" else "Grabar Sonido")
+            resultTextView.text = resultStr
         }
     }
 }
